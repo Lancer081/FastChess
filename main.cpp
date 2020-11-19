@@ -1,6 +1,6 @@
 #include <iostream>
 #include <chrono>
-#include <Bits.h>
+#include <vector>
 
 using namespace std;
 
@@ -36,23 +36,50 @@ const char* squareToCoords[] = {
 	"a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1"
 };
 
+// bishop relevant occupancy bit count for every square on board
+const int bishopRelevantBits[64] = {
+	6, 5, 5, 5, 5, 5, 5, 6,
+	5, 5, 5, 5, 5, 5, 5, 5,
+	5, 5, 7, 7, 7, 7, 5, 5,
+	5, 5, 7, 9, 9, 7, 5, 5,
+	5, 5, 7, 9, 9, 7, 5, 5,
+	5, 5, 7, 7, 7, 7, 5, 5,
+	5, 5, 5, 5, 5, 5, 5, 5,
+	6, 5, 5, 5, 5, 5, 5, 6
+};
+
+// rook relevant occupancy bit count for every square on board
+const int rookRelevantBits[64] = {
+	12, 11, 11, 11, 11, 11, 11, 12,
+	11, 10, 10, 10, 10, 10, 10, 11,
+	11, 10, 10, 10, 10, 10, 10, 11,
+	11, 10, 10, 10, 10, 10, 10, 11,
+	11, 10, 10, 10, 10, 10, 10, 11,
+	11, 10, 10, 10, 10, 10, 10, 11,
+	11, 10, 10, 10, 10, 10, 10, 11,
+	12, 11, 11, 11, 11, 11, 11, 12
+};
+
 uint64_t board[12];
 uint64_t occupied[3];
-uint64_t emptyBb[3];
 
 class Move {
 public:
-	Square from;
-	Square to;
-	Piece piece;
+	int from;
+	int to;
+	int piece;
 
 	bool isCapture;
 
 	Move()
 	{
+		from = 0;
+		to = 0;
+		piece = 0;
+		isCapture = false;
 	}
 
-	Move(Square from, Square to, Piece piece, bool isCapture = false)
+	Move(int from, int to, int piece, bool isCapture = false)
 	{
 		this->from = from;
 		this->to = to;
@@ -66,12 +93,12 @@ const uint64_t notHFile = 0x7f7f7f7f7f7f7f7f;
 const uint64_t notGHFile = 0x3f3f3f3f3f3f3f3f;
 const uint64_t notABFile = 0xfcfcfcfcfcfcfcfc;
 
-Square wKingSqr, bKingSqr;
+int wKingSqr, bKingSqr;
 
 bool whiteToMove = true;
 
-Move moveList[200];
-int moveListIndex = 0;
+vector<Move> moveList;
+vector<Move> moveHistory;
 
 Move bestMove;
 int positions = 0;
@@ -83,195 +110,9 @@ uint64_t bishopAttacks[64];
 uint64_t rookAttacks[64];
 uint64_t queenAttacks[64];
 
-uint64_t soutOne(uint64_t b) { return  b >> 8; }
-uint64_t nortOne(uint64_t b) { return  b << 8; }
-uint64_t eastOne(uint64_t b) { return (b & notHFile) << 1; }
-uint64_t noEaOne(uint64_t b) { return (b & notHFile) << 9; }
-uint64_t soEaOne(uint64_t b) { return (b & notHFile) >> 7; }
-uint64_t westOne(uint64_t b) { return (b & notAFile) >> 1; }
-uint64_t soWeOne(uint64_t b) { return (b & notAFile) >> 9; }
-uint64_t noWeOne(uint64_t b) { return (b & notAFile) << 7; }
-
-/*uint64_t soutFill(uint64_t gen) {
-	gen |= (gen >> 8);
-	gen |= (gen >> 16);
-	gen |= (gen >> 32);
-	return gen;
-}
-
-uint64_t nortFill(uint64_t gen) {
-	gen |= (gen << 8);
-	gen |= (gen << 16);
-	gen |= (gen << 32);
-	return gen;
-}
-
-uint64_t eastFill(uint64_t gen) {
-	const uint64_t pr0 = notAFile;
-	const uint64_t pr1 = pr0 & (pr0 << 1);
-	const uint64_t pr2 = pr1 & (pr1 << 2);
-	gen |= pr0 & (gen << 1);
-	gen |= pr1 & (gen << 2);
-	gen |= pr2 & (gen << 4);
-	return gen;
-}
-
-uint64_t noEaFill(uint64_t gen) {
-	const uint64_t pr0 = notAFile;
-	const uint64_t pr1 = pr0 & (pr0 << 9);
-	const uint64_t pr2 = pr1 & (pr1 << 18);
-	gen |= pr0 & (gen << 9);
-	gen |= pr1 & (gen << 18);
-	gen |= pr2 & (gen << 36);
-	return gen;
-}
-
-uint64_t soEaFill(uint64_t gen) {
-	const uint64_t pr0 = notAFile;
-	const uint64_t pr1 = pr0 & (pr0 >> 7);
-	const uint64_t pr2 = pr1 & (pr1 >> 14);
-	gen |= pr0 & (gen >> 7);
-	gen |= pr1 & (gen >> 14);
-	gen |= pr2 & (gen >> 28);
-	return gen;
-}
-
-uint64_t westFill(uint64_t gen) {
-	const uint64_t pr0 = notHFile;
-	const uint64_t pr1 = pr0 & (pr0 >> 1);
-	const uint64_t pr2 = pr1 & (pr1 >> 2);
-	gen |= pr0 & (gen >> 1);
-	gen |= pr1 & (gen >> 2);
-	gen |= pr2 & (gen >> 4);
-	return gen;
-}
-
-uint64_t soWeFill(uint64_t gen) {
-	const uint64_t pr0 = notHFile;
-	const uint64_t pr1 = pr0 & (pr0 >> 9);
-	const uint64_t pr2 = pr1 & (pr1 >> 18);
-	gen |= pr0 & (gen >> 9);
-	gen |= pr1 & (gen >> 18);
-	gen |= pr2 & (gen >> 36);
-	return gen;
-}
-
-uint64_t noWeFill(uint64_t gen) {
-	const uint64_t pr0 = notHFile;
-	const uint64_t pr1 = pr0 & (pr0 << 7);
-	const uint64_t pr2 = pr1 & (pr1 << 14);
-	gen |= pr0 & (gen << 7);
-	gen |= pr1 & (gen << 14);
-	gen |= pr2 & (gen << 28);
-	return gen;
-}*/
-
-uint64_t soutOccl(uint64_t gen, uint64_t pro) {
-	gen |= pro & (gen >> 8);
-	pro &= (pro >> 8);
-	gen |= pro & (gen >> 16);
-	pro &= (pro >> 16);
-	gen |= pro & (gen >> 32);
-	return gen;
-}
-
-uint64_t nortOccl(uint64_t gen, uint64_t pro) {
-	gen |= pro & (gen << 8);
-	pro &= (pro << 8);
-	gen |= pro & (gen << 16);
-	pro &= (pro << 16);
-	gen |= pro & (gen << 32);
-	return gen;
-}
-
-uint64_t eastOccl(uint64_t gen, uint64_t pro) {
-	pro &= notAFile;
-	gen |= pro & (gen << 1);
-	pro &= (pro << 1);
-	gen |= pro & (gen << 2);
-	pro &= (pro << 2);
-	gen |= pro & (gen << 4);
-	return gen;
-}
-
-uint64_t noEaOccl(uint64_t gen, uint64_t pro) {
-	pro &= notAFile;
-	gen |= pro & (gen << 9);
-	pro &= (pro << 9);
-	gen |= pro & (gen << 18);
-	pro &= (pro << 18);
-	gen |= pro & (gen << 36);
-	return gen;
-}
-
-uint64_t soEaOccl(uint64_t gen, uint64_t pro) {
-	pro &= notAFile;
-	gen |= pro & (gen >> 7);
-	pro &= (pro >> 7);
-	gen |= pro & (gen >> 14);
-	pro &= (pro >> 14);
-	gen |= pro & (gen >> 28);
-	return gen;
-}
-
-uint64_t westOccl(uint64_t gen, uint64_t pro) {
-	pro &= notHFile;
-	gen |= pro & (gen >> 1);
-	pro &= (pro >> 1);
-	gen |= pro & (gen >> 2);
-	pro &= (pro >> 2);
-	gen |= pro & (gen >> 4);
-	return gen;
-}
-
-uint64_t soWeOccl(uint64_t gen, uint64_t pro) {
-	pro &= notHFile;
-	gen |= pro & (gen >> 9);
-	pro &= (pro >> 9);
-	gen |= pro & (gen >> 18);
-	pro &= (pro >> 18);
-	gen |= pro & (gen >> 36);
-	return gen;
-}
-
-uint64_t noWeOccl(uint64_t gen, uint64_t pro) {
-	pro &= notHFile;
-	gen |= pro & (gen << 7);
-	pro &= (pro << 7);
-	gen |= pro & (gen << 14);
-	pro &= (pro << 14);
-	gen |= pro & (gen << 28);
-	return gen;
-}
-
-uint64_t soutAttacks(uint64_t rooks, uint64_t empty) { return soutOne(soutOccl(rooks, empty)); }
-uint64_t nortAttacks(uint64_t rooks, uint64_t empty) { return nortOne(nortOccl(rooks, empty)); }
-uint64_t eastAttacks(uint64_t rooks, uint64_t empty) { return eastOne(eastOccl(rooks, empty)); }
-uint64_t noEaAttacks(uint64_t bishops, uint64_t empty) { return noEaOne(noEaOccl(bishops, empty)); }
-uint64_t soEaAttacks(uint64_t bishops, uint64_t empty) { return soEaOne(soEaOccl(bishops, empty)); }
-uint64_t westAttacks(uint64_t rooks, uint64_t empty) { return westOne(westOccl(rooks, empty)); }
-uint64_t soWeAttacks(uint64_t bishops, uint64_t empty) { return soWeOne(soWeOccl(bishops, empty)); }
-uint64_t noWeAttacks(uint64_t bishops, uint64_t empty) { return noWeOne(noWeOccl(bishops, empty)); }
-
-BYTE getBit(uint64_t bb, int index)
-{
-	return (bb >> index) & 1ULL;
-}
-
-void setBit(uint64_t *bb, int index)
-{
-	*bb |= 1ULL << index;
-}
-
-void popBit(uint64_t *bb, int index)
-{
-	getBit(*bb, index) ? *bb ^= (1ULL << index) : 0;
-}
-
-void toggleBit(uint64_t* bb, int index)
-{
-	*bb ^= 1ULL << index;
-}
+#define setBit(bitboard, square) ((bitboard) |= (1ULL << (square)))
+#define getBit(bitboard, square) ((bitboard) & (1ULL << (square)))
+#define popBit(bitboard, square) ((bitboard) &= ~(1ULL << (square)))
 
 int countSetBits(uint64_t bb)
 {
@@ -284,6 +125,7 @@ int countSetBits(uint64_t bb)
 	return count;
 }
 
+// gets the least significant first bit
 int getFirstSetBit(uint64_t bb)
 {
 	int count = 0;
@@ -295,6 +137,23 @@ int getFirstSetBit(uint64_t bb)
 	}
 
 	return count;
+}
+
+uint64_t setOccupancy(int index, int bitsInMask, uint64_t attackMask)
+{
+	uint64_t occupancy = 0ULL;
+
+	for (int count = 0; count < bitsInMask; count++)
+	{
+		int square = getFirstSetBit(attackMask);
+
+		popBit(attackMask, square);
+
+		if (index & (1 << count))
+			occupancy |= (1ULL << square);
+	}
+
+	return occupancy;
 }
 
 void initBitboards()
@@ -311,8 +170,9 @@ void initBitboards()
 	board[q] = 0b0000000000000000000000000000000000000000000000000000000000001000;
 	board[K] = 0b0001000000000000000000000000000000000000000000000000000000000000;
 	board[k] = 0b0000000000000000000000000000000000000000000000000000000000010000;
-	emptyBb[both] = ~(board[P] | board[p] | board[R] | board[r] | board[B] | board[b] | board[N] | board[n] | board[Q] | board[q] | board[K] | board[k]);
-	occupied[both] = board[P] | board[p] | board[R] | board[r] | board[B] | board[b] | board[N] | board[n] | board[Q] | board[q] | board[K] | board[k];
+	occupied[white] = board[P] | board[N] | board[B] | board[R] | board[Q] | board[K];
+	occupied[black] = board[p] | board[n] | board[b] | board[r] | board[q] | board[k];
+	occupied[both] = occupied[white] | occupied[black];
 }
 
 void printBitboard(uint64_t bb)
@@ -328,14 +188,14 @@ void printBitboard(uint64_t bb)
 	cout << endl << endl;
 }
 
-uint64_t maskPawnAttacks(int sqr, int turn)
+uint64_t maskPawnAttacks(int sqr, bool whiteToMove)
 {
 	uint64_t bitboard = 0ULL;
 	uint64_t attacks = 0ULL;
 
-	setBit(&bitboard, sqr);
+	setBit(bitboard, sqr);
 
-	if (turn == white)
+	if (whiteToMove)
 	{
 		if ((bitboard >> 7) & notAFile) attacks |= (bitboard >> 7);
 		if ((bitboard >> 9) & notHFile) attacks |= (bitboard >> 9);
@@ -354,7 +214,7 @@ uint64_t maskKnightAttacks(int sqr)
 	uint64_t bitboard = 0ULL;
 	uint64_t attacks = 0ULL;
 
-	setBit(&bitboard, sqr);
+	setBit(bitboard, sqr);
 
 	if ((bitboard >> 15) & notAFile) attacks |= bitboard >> 15;
 	if ((bitboard >> 17) & notHFile) attacks |= bitboard >> 17;
@@ -374,7 +234,7 @@ uint64_t maskKingAttacks(int sqr)
 	uint64_t bitboard = 0ULL;
 	uint64_t attacks = 0ULL;
 
-	setBit(&bitboard, sqr);
+	setBit(bitboard, sqr);
 
 	if ((bitboard >> 7) & notAFile) attacks |= bitboard >> 7;
 	if (bitboard >> 8) attacks |= bitboard >> 8;
@@ -431,22 +291,22 @@ uint64_t bishopAttacksOTF(int sqr, uint64_t blockers)
 	int tr = sqr / 8;
 	int tf = sqr % 8;
 
-	for (r = tr + 1, f = tf + 1; r <= 6 && f <= 6; r++, f++)
+	for (r = tr + 1, f = tf + 1; r <= 7 && f <= 7; r++, f++)
 	{
 		attacks |= (1ULL << (r * 8 + f));
 		if ((1ULL << (r * 8 + f)) & blockers) break;
 	}
-	for (r = tr - 1, f = tf + 1; r >= 1 && f <= 6; r--, f++)
+	for (r = tr - 1, f = tf + 1; r >= 0 && f <= 7; r--, f++)
 	{
 		attacks |= (1ULL << (r * 8 + f));
 		if ((1ULL << (r * 8 + f)) & blockers) break;
 	}
-	for (r = tr + 1, f = tf - 1; r <= 6 && f >= 1; r++, f--)
+	for (r = tr + 1, f = tf - 1; r <= 7 && f >= 0; r++, f--)
 	{
 		attacks |= (1ULL << (r * 8 + f));
 		if ((1ULL << (r * 8 + f)) & blockers) break;
 	}
-	for (r = tr - 1, f = tf - 1; r >= 1 && f >= 1; r--, f--)
+	for (r = tr - 1, f = tf - 1; r >= 0 && f >= 0; r--, f--)
 	{
 		attacks |= (1ULL << (r * 8 + f));
 		if ((1ULL << (r * 8 + f)) & blockers) break;
@@ -457,17 +317,13 @@ uint64_t bishopAttacksOTF(int sqr, uint64_t blockers)
 
 uint64_t rookAttacksOTF(int square, uint64_t blockers)
 {
-	// result attacks bitboard
 	uint64_t attacks = 0ULL;
 
-	// init ranks & files
 	int r, f;
 
-	// init target rank & files
 	int tr = square / 8;
 	int tf = square % 8;
 
-	// generate rook attacks
 	for (r = tr + 1; r <= 7; r++)
 	{
 		attacks |= (1ULL << (r * 8 + tf));
@@ -492,16 +348,15 @@ uint64_t rookAttacksOTF(int square, uint64_t blockers)
 		if ((1ULL << (tr * 8 + f)) & blockers) break;
 	}
 
-	// return attack map
 	return attacks;
 }
 
 void initLeaperAttacks()
 {
-	for (int sqr = a1; sqr <= h8; sqr++)
+	for (int sqr = 0; sqr < 64; sqr++)
 	{
-		pawnAttacks[white][sqr] = maskPawnAttacks(sqr, white);
-		pawnAttacks[black][sqr] = maskPawnAttacks(sqr, black);
+		pawnAttacks[white][sqr] = maskPawnAttacks(sqr, true);
+		pawnAttacks[black][sqr] = maskPawnAttacks(sqr, false);
 
 		knightAttacks[sqr] = maskKnightAttacks(sqr);
 
@@ -513,9 +368,19 @@ void initLeaperAttacks()
 	}
 }
 
+void initSliderAttacks()
+{
+	for (int sqr = 0; sqr < 64; sqr++)
+	{
+		bishopAttacks[sqr] = maskBishopAttacks(sqr);
+		rookAttacks[sqr] = maskRookAttacks(sqr);
+	}
+}
+
 void initAttackMasks()
 {
 	initLeaperAttacks();
+	initSliderAttacks();
 }
 
 void printBoard()
@@ -525,247 +390,238 @@ void printBoard()
 		if (i == a1 || i == a2 || i == a3 || i == a4 || i == a5 || i == a6 || i == a7)
 			cout << endl;
 
-		if (getBit(board[P], i) == 1)
-			cout << " wP";
+		if (getBit(board[P], i))
+			cout << " P";
 		else if (getBit(board[p], i))
-			cout << " bP";
+			cout << " p";
 		else if (getBit(board[N], i))
-			cout << " wN";
+			cout << " N";
 		else if (getBit(board[n], i))
-			cout << " bN";
+			cout << " n";
 		else if (getBit(board[B], i))
-			cout << " wB";
+			cout << " B";
 		else if (getBit(board[b], i))
-			cout << " bB";
+			cout << " b";
 		else if (getBit(board[R], i))
-			cout << " wR";
+			cout << " R";
 		else if (getBit(board[r], i))
-			cout << " bR";
+			cout << " r";
 		else if (getBit(board[Q], i))
-			cout << " wQ";
+			cout << " Q";
 		else if (getBit(board[q], i))
-			cout << " bQ";
+			cout << " q";
 		else if (getBit(board[K], i))
-			cout << " wK";
+			cout << " K";
 		else if (getBit(board[k], i))
-			cout << " bK";
+			cout << " k";
 		else 
-			cout << " --";
+			cout << " -";
 	}
 
-	cout << endl << endl;
+	cout << endl << endl << "Side: " << whiteToMove << endl << endl;
+
+	cout << "Bitboard: " << (uint64_t)occupied[both] << "ULL" << endl << endl;
 }
 
-uint64_t getSinglePawnPushes(bool whiteToMove)
-{
-	if (whiteToMove)
-		return (board[P] >> 8) & emptyBb[both];
-	else
-		return (board[p] << 8) & emptyBb[both];
+uint64_t getRookMoves(Square sqr, uint64_t blockers)
+{;
+	return rookAttacksOTF(sqr, blockers);
 }
 
-uint64_t getDoublePawnPushes(bool whiteToMove)
+uint64_t getBishopMoves(Square sqr, uint64_t blockers)
 {
-	uint64_t rank5 = 0x0000000FF00000000;
-	uint64_t rank4 = 0x00000000FF000000;
-	
-	if (whiteToMove)
-		return soutOne(getSinglePawnPushes(whiteToMove)) & emptyBb[both] & rank5;
-	else
-		return nortOne(getSinglePawnPushes(whiteToMove)) & emptyBb[both] & rank4;
-}
-
-uint64_t getPawnCaptures(bool whiteToMove)
-{
-	uint64_t eastCapture, westCapture;
-
-	if (whiteToMove)
-	{
-		eastCapture = soEaOne(board[P]);
-		westCapture = soWeOne(board[P]);
-
-		return eastCapture | westCapture;
-	}
-	else
-	{
-		eastCapture = noEaOne(board[p]);
-		westCapture = noWeOne(board[p]);
-
-		return eastCapture | westCapture;
-	}
-}
-
-uint64_t getPawnMoves(bool whiteToMove)
-{
-	uint64_t singlePushs, doublePushs, eastCapture, westCapture;
-
-	if (whiteToMove)
-	{
-		uint64_t rank5 = 0x0000000FF00000000;
-
-		singlePushs = soutOne(board[P]) & board[P];
-		doublePushs = soutOne(singlePushs) & emptyBb[both] & rank5;
-		eastCapture = soEaOne(board[P]);
-		westCapture = soWeOne(board[P]);
-
-		return singlePushs | doublePushs | eastCapture | westCapture;
-	}
-	else
-	{
-		uint64_t rank4 = 0x00000000FF000000;
-
-		singlePushs = nortOne(board[p]) & board[p];
-		doublePushs = nortOne(singlePushs) & emptyBb[both] & rank4;
-		eastCapture = noEaOne(board[p]);
-		westCapture = noWeOne(board[p]);
-
-		return singlePushs | doublePushs | eastCapture | westCapture;
-	}
-}
-
-uint64_t getKnightMoves(uint64_t knightBb, uint64_t emptyBb)
-{
-	uint64_t west, east, moves;
-
-	east = eastOne(knightBb);
-	west = westOne(knightBb);
-	moves = (east | west) << 16;
-	moves |= (east | west) >> 16;
-	east = eastOne(east);
-	west = westOne(west);
-	moves |= (east | west) << 8;
-	moves |= (east | west) >> 8;
-
-	return moves & emptyBb;
-}
-
-uint64_t getKingMoves(uint64_t kingBb)
-{
-	uint64_t moves = eastOne(kingBb) | westOne(kingBb);
-	kingBb |= moves;
-	moves |= nortOne(kingBb) | soutOne(kingBb);
-	return moves; // & bbs.empty
-}
-
-uint64_t getRookMoves()
-{
-	uint64_t blockers = 0ULL;
-	uint64_t rookAtcs = rookAttacksOTF(d4, blockers);
-
-	return rookAtcs;
-}
-
-uint64_t getBishopMoves(uint64_t bishopBb, uint64_t occupied)
-{
-	return 0;
+	return bishopAttacksOTF(sqr, blockers);
 }
 
 uint64_t getLegalMoves(bool whiteToMove)
 {
-	uint64_t pawnMoves, knightMoves, bishopMoves, rookMoves, queenMoves, kingMoves;
-
-	if (whiteToMove)
-	{
-		pawnMoves = getPawnMoves(true);
-		knightMoves = getKnightMoves(board[N], emptyBb[both]);
-		kingMoves = getKingMoves(board[K]);
-	}
-	else
-	{
-		pawnMoves = getPawnMoves(false);
-		knightMoves = getKnightMoves(board[n], emptyBb[both]);
-		kingMoves = getKingMoves(board[k]);
-	}
-
-	return pawnMoves | knightMoves | kingMoves;
+	return 1;
 }
 
 // populates the moveList
 void generateMoves()
 {
-	moveListIndex = 0;
+	int source, target;
 
 	if (whiteToMove)
 	{
-		uint64_t pawnMoves = getSinglePawnPushes(true);
+		// generate quiet pawn moves
+		uint64_t pawnMoves = board[P] << 8;
 
 		while (pawnMoves)
 		{
-			Square target = (Square)getFirstSetBit(pawnMoves);
-			Square source = (Square)(target + 8);
+			target = getFirstSetBit(pawnMoves);
+			source = target + 8;
 
-			moveList[moveListIndex] = Move(source, target, P);
-			moveListIndex++;
+			if (!getBit(occupied[both], target))
+			{
+				// add move to movelist
+				moveList.push_back(Move(source, target, P));
+			}
 
-			popBit(&pawnMoves, target);
+			popBit(pawnMoves, target);
+		}
+
+		//pawnMoves = getDoublePawnPushes(true);
+
+		while (pawnMoves)
+		{
+			target = getFirstSetBit(pawnMoves);
+			source = target + 16;
+
+			if (!getBit(occupied[both], target))
+			{
+				moveList.push_back(Move(source, target, P));
+			}
+
+			popBit(pawnMoves, target);
 		}
 	}
 	else
 	{
-		uint64_t pawnMoves = getSinglePawnPushes(false);
+		uint64_t pawnMoves = 0;// = getSinglePawnPushes(false);
 
 		while (pawnMoves)
 		{
-			Square target = (Square)getFirstSetBit(pawnMoves);
-			Square source = (Square)(target - 8);
+			target = getFirstSetBit(pawnMoves);
+			source = target - 8;
 
-			moveList[moveListIndex] = Move(source, target, p);
-			moveListIndex++;
+			if (!getBit(occupied[both], target))
+			{
+				moveList.push_back(Move(source, target, p));
+			}
 
-			popBit(&pawnMoves, target);
+			popBit(pawnMoves, target);
+		}
+
+		//pawnMoves = getDoublePawnPushes(false);
+
+		while (pawnMoves)
+		{
+			target = getFirstSetBit(pawnMoves);
+			source = target - 16;
+
+			if (!getBit(occupied[both], target))
+			{
+				moveList.push_back(Move(source, target, p));
+			}
+
+			popBit(pawnMoves, target);
 		}
 	}
+
+	// generate pawn captures
+	uint64_t pawnAtcs;
+	uint64_t pawns = whiteToMove ? board[P] : board[p];
+
+	while (pawns)
+	{
+		source = getFirstSetBit(pawns);
+		pawnAtcs = pawnAttacks[whiteToMove ? white : black][source] & occupied[whiteToMove ? white : black];
+
+		while (pawnAtcs)
+		{
+			target = getFirstSetBit(pawnAtcs);
+
+			moveList.push_back(Move(source, target, whiteToMove ? P : p));
+
+			popBit(pawnAtcs, target);
+		}
+
+		popBit(pawns, source);
+	}
+
+	// generate knight moves
+	uint64_t knightMoves;
+	uint64_t knightBb = whiteToMove ? board[N] : board[n];
+
+	while (knightBb)
+	{
+		source = getFirstSetBit(knightBb);
+
+		knightMoves = knightAttacks[source] & (whiteToMove ? ~occupied[white] : ~occupied[black]);
+
+		while (knightMoves)
+		{
+			target = getFirstSetBit(knightMoves);
+
+			moveList.push_back(Move(source, target, whiteToMove ? N : n));
+
+			popBit(knightMoves, target);
+		}
+
+		popBit(knightBb, source);
+	}
+
+	
+	uint64_t kingBb = whiteToMove ? board[K] : board[k];
+	source = getFirstSetBit(kingBb);
+	uint64_t kingMoves = kingAttacks[source];
+
+
 }
 
 void printMoveList()
 {
-	for (int i = 0; i < moveListIndex; i++)
-	{
-		cout << squareToCoords[moveList[i].from] << squareToCoords[moveList[i].to] << endl;
-	}
+	for (Move move : moveList)
+		cout << squareToCoords[move.from] << squareToCoords[move.to] << endl;
+
 	cout << endl;
 }
 
-bool isSquareAttacked(int square, bool whiteToMove)
+bool isSquareAttacked(Square square, bool whiteToMove)
 {
-	if (whiteToMove && (getPawnCaptures(false) & board[P])) return 1;
-	if (!whiteToMove && (getPawnCaptures(true) & board[P])) return 1;
+	if (getBishopMoves(square, occupied[both] & bishopAttacks[square]) & (whiteToMove ? board[B] : board[b])) return true;
 
-	if ((whiteToMove ? getKnightMoves(board[N], emptyBb[both]) : getKnightMoves(board[n], emptyBb[both])) & (whiteToMove ? board[N] : board[b])) return 1;
-
-	if ((whiteToMove ? getKingMoves(board[K]) : getKingMoves(board[k])) & (whiteToMove ? board[K] : board[k])) return 1;
+	if (getRookMoves(square, occupied[both] & rookAttacks[square]) & (whiteToMove ? board[R] : board[r])) return true;
 
 	return false;
 }
 
 void makeMove(Move move)
 {
-	setBit(&board[move.piece], move.to);
-	popBit(&board[move.piece], move.from);
-	setBit(&emptyBb[both], move.from);
-	popBit(&occupied[both], move.from);
+	setBit(board[move.piece], move.to);
+	popBit(board[move.piece], move.from);
+	popBit(occupied[both], move.from);
+	setBit(occupied[both], move.to);
+	
+	if (whiteToMove)
+		popBit(occupied[white], move.from);
+	else
+		popBit(occupied[black], move.from);
 
-	if (board[move.piece] == board[K])
+	if (move.piece == K)
 		wKingSqr = move.to;
-	else if (board[move.piece] == board[k])
+	else if (move.piece == k)
 		bKingSqr = move.to;
 
-	whiteToMove = !whiteToMove;
+	whiteToMove ^= 1;
+
+	moveHistory.push_back(move);
 }
 
-void undoMove(Move move)
+void undoMove()
 {
-	setBit(&board[move.piece], move.from);
-	popBit(&board[move.piece], move.to);
-	popBit(&emptyBb[both], move.to);
-	setBit(&occupied[both], move.to);
+	Move move = moveHistory.back();
 
-	if (board[move.piece] == board[K])
+	setBit(board[move.piece], move.from);
+	popBit(board[move.piece], move.to);
+	setBit(occupied[both], move.to);
+	popBit(occupied[both], move.from);
+
+	if (whiteToMove)
+		popBit(occupied[white], move.from);
+	else
+		popBit(occupied[black], move.from);
+
+	if (move.piece == K)
 		wKingSqr = move.from;
-	else if (board[move.piece] == board[k])
+	else if (move.piece == k)
 		bKingSqr = move.from;
 
-	whiteToMove = !whiteToMove;
+	whiteToMove ^= 1;
+
+	moveHistory.pop_back();
 }
 
 double evaluate()
@@ -802,11 +658,14 @@ int quiesce(int alpha, int beta)
 	if (alpha < standPat)
 		alpha = standPat;
 
-	//for (every capture)
+	for (Move move : moveList)
 	{
-		//makeMove(capture);
+		if (!move.isCapture)
+			continue;
+
+		makeMove(move);
 		int score = -quiesce(-beta, -alpha);
-		//undoMove();
+		undoMove();
 
 		if (score >= beta)
 			return beta;
@@ -819,37 +678,42 @@ int quiesce(int alpha, int beta)
 
 bool isGameOver()
 {
-	if (getSinglePawnPushes(true) == 0)
+	if (getLegalMoves(true) == 0)
 		return true;
-	else if (getSinglePawnPushes(false) == 0)
+	else if (getLegalMoves(false) == 0)
 		return true;
 
 	return false;
 }
 
-int negamax(int depth, int alpha, int beta, bool whiteToMove)
+int negamax(int depth, int alpha, int beta)
 {
 	if (depth == 0 || isGameOver())
-		return evaluate();
+		return quiesce(alpha, beta);
 
+	int score = 0;
 	int bestScore = -10000;
 
 	generateMoves();
 
-	for(int i = 0; i < moveListIndex; i++)
+	for(Move move : moveList)
 	{
+		if (move.from < 0)
+		{
+			cout << "Error move!" << endl;
+			continue; //invalid move
+		}
+
 		positions++;
 
-		generateMoves();
-
-		makeMove(moveList[i]);
-		int score = -negamax(depth - 1, -beta, -alpha, !whiteToMove);
-		undoMove(moveList[i]);
+		makeMove(move);
+		score = -negamax(depth - 1, -beta, -alpha);
+		undoMove();
 
 		if (score > bestScore)
 		{
 			bestScore = score;
-			bestMove = moveList[i];
+			bestMove = move;
 		}
 
 		alpha = max(alpha, bestScore);
@@ -863,28 +727,29 @@ int negamax(int depth, int alpha, int beta, bool whiteToMove)
 
 int main()
 {
-	auto start = chrono::high_resolution_clock::now();
+	//initBitboards();
+	initAttackMasks();
 
-	initBitboards();
-	//initAttackMasks();
+	
+
+	return 0;
 
 	printBoard();
 
-	generateMoves();
-	
-	int score = negamax(4, -10000, 10000, true);
+	auto start = chrono::high_resolution_clock::now();
+
+	int score = negamax(4, -10000, 10000);
+
+	auto stop = chrono::high_resolution_clock::now();
+	auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start).count();
 
 	cout << "Position Score: " << score << endl;
 	cout << "Positions Evaluated: " << positions << endl;
+	cout << "Run time: " << duration << " milliseconds" << endl << endl;
 
 	positions = 0;
 
 	printBoard();
-	
-	auto stop = chrono::high_resolution_clock::now();
-	auto duration = chrono::duration_cast<chrono::milliseconds>(stop - start).count();
 
-	cout << "Run time: " << duration << " milliseconds" << endl;
-	
 	return 0;
 }
